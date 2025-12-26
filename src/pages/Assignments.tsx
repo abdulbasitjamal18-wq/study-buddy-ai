@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CheckSquare, Plus, Calendar, Clock, Trash2, Check, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { CheckSquare, Plus, Calendar, Clock, Trash2, Check, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,69 +21,64 @@ import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Helmet } from "react-helmet-async";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Assignment {
   id: string;
   title: string;
-  subject: string;
-  dueDate: string;
-  priority: "low" | "medium" | "high";
-  type: "assignment" | "quiz" | "exam";
-  completed: boolean;
+  subject: string | null;
+  due_date: string | null;
+  priority: string | null;
+  status: string | null;
+  description: string | null;
 }
 
-const initialAssignments: Assignment[] = [
-  {
-    id: "1",
-    title: "Data Structures Lab Report",
-    subject: "Computer Science",
-    dueDate: "2024-12-28",
-    priority: "high",
-    type: "assignment",
-    completed: false,
-  },
-  {
-    id: "2",
-    title: "Physics Mid-term Exam",
-    subject: "Physics",
-    dueDate: "2024-12-30",
-    priority: "high",
-    type: "exam",
-    completed: false,
-  },
-  {
-    id: "3",
-    title: "Mathematics Quiz - Calculus",
-    subject: "Mathematics",
-    dueDate: "2024-12-27",
-    priority: "medium",
-    type: "quiz",
-    completed: false,
-  },
-  {
-    id: "4",
-    title: "Literature Essay",
-    subject: "English",
-    dueDate: "2025-01-05",
-    priority: "low",
-    type: "assignment",
-    completed: true,
-  },
-];
-
 const Assignments = () => {
-  const [assignments, setAssignments] = useState<Assignment[]>(initialAssignments);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [newAssignment, setNewAssignment] = useState({
     title: "",
     subject: "",
     dueDate: "",
-    priority: "medium" as "low" | "medium" | "high",
-    type: "assignment" as "assignment" | "quiz" | "exam",
+    priority: "medium",
+    type: "assignment",
   });
   const { toast } = useToast();
+  const { user } = useAuth();
 
-  const handleAddAssignment = () => {
+  // Fetch assignments from Supabase
+  useEffect(() => {
+    const fetchAssignments = async () => {
+      if (!user) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("assignments")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        setAssignments(data || []);
+      } catch (error) {
+        console.error("Error fetching assignments:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load assignments.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAssignments();
+  }, [user, toast]);
+
+  const handleAddAssignment = async () => {
     if (!newAssignment.title || !newAssignment.subject || !newAssignment.dueDate) {
       toast({
         title: "Missing information",
@@ -93,50 +88,135 @@ const Assignments = () => {
       return;
     }
 
-    const assignment: Assignment = {
-      id: Date.now().toString(),
-      ...newAssignment,
-      completed: false,
-    };
+    if (!user) {
+      toast({
+        title: "Not authenticated",
+        description: "Please log in to add assignments.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    setAssignments((prev) => [...prev, assignment]);
-    setNewAssignment({
-      title: "",
-      subject: "",
-      dueDate: "",
-      priority: "medium",
-      type: "assignment",
-    });
-    setIsDialogOpen(false);
-    toast({
-      title: "Assignment added!",
-      description: "Your new task has been added to the tracker.",
-    });
+    setIsSaving(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("assignments")
+        .insert({
+          title: newAssignment.title,
+          subject: newAssignment.subject,
+          due_date: newAssignment.dueDate,
+          priority: newAssignment.priority,
+          description: newAssignment.type,
+          status: "pending",
+          user_id: user.id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setAssignments((prev) => [data, ...prev]);
+      setNewAssignment({
+        title: "",
+        subject: "",
+        dueDate: "",
+        priority: "medium",
+        type: "assignment",
+      });
+      setIsDialogOpen(false);
+      toast({
+        title: "Assignment added!",
+        description: "Your new task has been added to the tracker.",
+      });
+    } catch (error) {
+      console.error("Error adding assignment:", error);
+      toast({
+        title: "Error",
+        description: "Failed to add assignment.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const toggleComplete = (id: string) => {
-    setAssignments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, completed: !a.completed } : a))
-    );
+  const toggleComplete = async (id: string) => {
+    const assignment = assignments.find((a) => a.id === id);
+    if (!assignment) return;
+
+    const newStatus = assignment.status === "completed" ? "pending" : "completed";
+
+    try {
+      const { error } = await supabase
+        .from("assignments")
+        .update({ status: newStatus })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setAssignments((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
+      );
+    } catch (error) {
+      console.error("Error updating assignment:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update assignment.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const deleteAssignment = (id: string) => {
-    setAssignments((prev) => prev.filter((a) => a.id !== id));
-    toast({
-      title: "Assignment deleted",
-      description: "The task has been removed.",
-    });
+  const deleteAssignment = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from("assignments")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setAssignments((prev) => prev.filter((a) => a.id !== id));
+      toast({
+        title: "Assignment deleted",
+        description: "The task has been removed.",
+      });
+    } catch (error) {
+      console.error("Error deleting assignment:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete assignment.",
+        variant: "destructive",
+      });
+    }
   };
 
   const sortedAssignments = [...assignments].sort((a, b) => {
-    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-    const priorityOrder = { high: 0, medium: 1, low: 2 };
-    return priorityOrder[a.priority] - priorityOrder[b.priority];
+    const aCompleted = a.status === "completed";
+    const bCompleted = b.status === "completed";
+    if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    return (priorityOrder[a.priority || "medium"] || 1) - (priorityOrder[b.priority || "medium"] || 1);
   });
 
-  const urgentCount = assignments.filter((a) => !a.completed && a.priority === "high").length;
-  const upcomingCount = assignments.filter((a) => !a.completed && a.priority !== "high").length;
-  const completedCount = assignments.filter((a) => a.completed).length;
+  const urgentCount = assignments.filter((a) => a.status !== "completed" && a.priority === "high").length;
+  const upcomingCount = assignments.filter((a) => a.status !== "completed" && a.priority !== "high").length;
+  const completedCount = assignments.filter((a) => a.status === "completed").length;
+
+  if (isLoading) {
+    return (
+      <>
+        <Helmet>
+          <title>Assignments - StudyAI</title>
+        </Helmet>
+        <DashboardHeader title="Assignment Tracker" subtitle="Manage your deadlines and tasks" />
+        <div className="p-6 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -215,7 +295,7 @@ const Assignments = () => {
                     <Label>Priority</Label>
                     <Select
                       value={newAssignment.priority}
-                      onValueChange={(value: "low" | "medium" | "high") =>
+                      onValueChange={(value) =>
                         setNewAssignment((prev) => ({ ...prev, priority: value }))
                       }
                     >
@@ -234,7 +314,7 @@ const Assignments = () => {
                   <Label>Type</Label>
                   <Select
                     value={newAssignment.type}
-                    onValueChange={(value: "assignment" | "quiz" | "exam") =>
+                    onValueChange={(value) =>
                       setNewAssignment((prev) => ({ ...prev, type: value }))
                     }
                   >
@@ -248,8 +328,15 @@ const Assignments = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={handleAddAssignment} className="w-full">
-                  Add Task
+                <Button onClick={handleAddAssignment} className="w-full" disabled={isSaving}>
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      Adding...
+                    </>
+                  ) : (
+                    "Add Task"
+                  )}
                 </Button>
               </div>
             </DialogContent>
@@ -258,81 +345,93 @@ const Assignments = () => {
 
         {/* Assignment List */}
         <div className="space-y-3">
-          {sortedAssignments.map((assignment) => (
-            <div
-              key={assignment.id}
-              className={cn(
-                "flex items-center gap-4 p-4 rounded-xl glass-card transition-all duration-200",
-                assignment.completed && "opacity-60"
-              )}
-            >
-              <button
-                onClick={() => toggleComplete(assignment.id)}
-                className={cn(
-                  "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors",
-                  assignment.completed
-                    ? "bg-green-500 border-green-500"
-                    : "border-muted-foreground hover:border-primary"
-                )}
-              >
-                {assignment.completed && <Check className="w-4 h-4 text-primary-foreground" />}
-              </button>
-
-              <div
-                className={cn(
-                  "w-1 h-12 rounded-full",
-                  assignment.priority === "high"
-                    ? "bg-destructive"
-                    : assignment.priority === "medium"
-                    ? "bg-orange-500"
-                    : "bg-green-500"
-                )}
-              />
-
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3
-                    className={cn(
-                      "font-medium text-foreground",
-                      assignment.completed && "line-through"
-                    )}
-                  >
-                    {assignment.title}
-                  </h3>
-                  <span
-                    className={cn(
-                      "px-2 py-0.5 rounded-full text-xs font-medium",
-                      assignment.type === "exam"
-                        ? "bg-destructive/10 text-destructive"
-                        : assignment.type === "quiz"
-                        ? "bg-orange-500/10 text-orange-600"
-                        : "bg-blue-500/10 text-blue-600"
-                    )}
-                  >
-                    {assignment.type}
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">{assignment.subject}</p>
-              </div>
-
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Calendar className="w-4 h-4" />
-                {new Date(assignment.dueDate).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </div>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-destructive"
-                onClick={() => deleteAssignment(assignment.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
+          {sortedAssignments.length === 0 ? (
+            <div className="text-center py-12">
+              <CheckSquare className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="font-medium text-foreground mb-1">No assignments yet</h3>
+              <p className="text-sm text-muted-foreground">
+                Add your first task to get started
+              </p>
             </div>
-          ))}
+          ) : (
+            sortedAssignments.map((assignment) => (
+              <div
+                key={assignment.id}
+                className={cn(
+                  "flex items-center gap-4 p-4 rounded-xl glass-card transition-all duration-200",
+                  assignment.status === "completed" && "opacity-60"
+                )}
+              >
+                <button
+                  onClick={() => toggleComplete(assignment.id)}
+                  className={cn(
+                    "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors",
+                    assignment.status === "completed"
+                      ? "bg-green-500 border-green-500"
+                      : "border-muted-foreground hover:border-primary"
+                  )}
+                >
+                  {assignment.status === "completed" && <Check className="w-4 h-4 text-primary-foreground" />}
+                </button>
+
+                <div
+                  className={cn(
+                    "w-1 h-12 rounded-full",
+                    assignment.priority === "high"
+                      ? "bg-destructive"
+                      : assignment.priority === "medium"
+                      ? "bg-orange-500"
+                      : "bg-green-500"
+                  )}
+                />
+
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3
+                      className={cn(
+                        "font-medium text-foreground",
+                        assignment.status === "completed" && "line-through"
+                      )}
+                    >
+                      {assignment.title}
+                    </h3>
+                    <span
+                      className={cn(
+                        "px-2 py-0.5 rounded-full text-xs font-medium",
+                        assignment.description === "exam"
+                          ? "bg-destructive/10 text-destructive"
+                          : assignment.description === "quiz"
+                          ? "bg-orange-500/10 text-orange-600"
+                          : "bg-blue-500/10 text-blue-600"
+                      )}
+                    >
+                      {assignment.description || "assignment"}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{assignment.subject}</p>
+                </div>
+
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Calendar className="w-4 h-4" />
+                  {assignment.due_date
+                    ? new Date(assignment.due_date).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "No date"}
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => deleteAssignment(assignment.id)}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </>

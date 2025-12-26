@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Calendar, Clock, BookOpen, Sparkles, Loader2, Plus } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Calendar, Clock, BookOpen, Sparkles, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,8 +7,21 @@ import { Textarea } from "@/components/ui/textarea";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { useToast } from "@/hooks/use-toast";
 import { Helmet } from "react-helmet-async";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
-interface StudyPlan {
+interface StudyPlanDB {
+  id: string;
+  title: string;
+  subject: string | null;
+  description: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  status: string | null;
+  created_at: string;
+}
+
+interface StudyPlanDay {
   day: string;
   sessions: { time: string; topic: string; duration: string }[];
 }
@@ -19,8 +32,36 @@ const StudyPlanner = () => {
   const [examDate, setExamDate] = useState("");
   const [studyHours, setStudyHours] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedPlan, setGeneratedPlan] = useState<StudyPlan[] | null>(null);
+  const [generatedPlan, setGeneratedPlan] = useState<StudyPlanDay[] | null>(null);
+  const [savedPlans, setSavedPlans] = useState<StudyPlanDB[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<StudyPlanDB | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const { user } = useAuth();
+
+  // Fetch saved study plans
+  useEffect(() => {
+    const fetchPlans = async () => {
+      if (!user) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("study_plans")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        setSavedPlans(data || []);
+      } catch (error) {
+        console.error("Error fetching study plans:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPlans();
+  }, [user]);
 
   const handleGenerate = async () => {
     if (!subject || !topics || !examDate || !studyHours) {
@@ -32,54 +73,130 @@ const StudyPlanner = () => {
       return;
     }
 
+    if (!user) {
+      toast({
+        title: "Not authenticated",
+        description: "Please log in to create a study plan.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGenerating(true);
 
-    // Simulate AI generation
-    setTimeout(() => {
-      const mockPlan: StudyPlan[] = [
-        {
-          day: "Monday",
-          sessions: [
-            { time: "9:00 AM - 11:00 AM", topic: topics.split(",")[0]?.trim() || "Introduction", duration: "2 hours" },
-            { time: "2:00 PM - 4:00 PM", topic: "Practice Problems", duration: "2 hours" },
-          ],
-        },
-        {
-          day: "Tuesday",
-          sessions: [
-            { time: "9:00 AM - 11:00 AM", topic: topics.split(",")[1]?.trim() || "Core Concepts", duration: "2 hours" },
-            { time: "3:00 PM - 5:00 PM", topic: "Review Session", duration: "2 hours" },
-          ],
-        },
-        {
-          day: "Wednesday",
-          sessions: [
-            { time: "10:00 AM - 12:00 PM", topic: topics.split(",")[2]?.trim() || "Advanced Topics", duration: "2 hours" },
-          ],
-        },
-        {
-          day: "Thursday",
-          sessions: [
-            { time: "9:00 AM - 11:00 AM", topic: "Problem Solving", duration: "2 hours" },
-            { time: "2:00 PM - 4:00 PM", topic: "Mock Test", duration: "2 hours" },
-          ],
-        },
-        {
-          day: "Friday",
-          sessions: [
-            { time: "10:00 AM - 12:00 PM", topic: "Revision", duration: "2 hours" },
-            { time: "3:00 PM - 4:00 PM", topic: "Doubt Clearing", duration: "1 hour" },
-          ],
-        },
-      ];
+    // Generate mock plan
+    const mockPlan: StudyPlanDay[] = [
+      {
+        day: "Monday",
+        sessions: [
+          { time: "9:00 AM - 11:00 AM", topic: topics.split(",")[0]?.trim() || "Introduction", duration: "2 hours" },
+          { time: "2:00 PM - 4:00 PM", topic: "Practice Problems", duration: "2 hours" },
+        ],
+      },
+      {
+        day: "Tuesday",
+        sessions: [
+          { time: "9:00 AM - 11:00 AM", topic: topics.split(",")[1]?.trim() || "Core Concepts", duration: "2 hours" },
+          { time: "3:00 PM - 5:00 PM", topic: "Review Session", duration: "2 hours" },
+        ],
+      },
+      {
+        day: "Wednesday",
+        sessions: [
+          { time: "10:00 AM - 12:00 PM", topic: topics.split(",")[2]?.trim() || "Advanced Topics", duration: "2 hours" },
+        ],
+      },
+      {
+        day: "Thursday",
+        sessions: [
+          { time: "9:00 AM - 11:00 AM", topic: "Problem Solving", duration: "2 hours" },
+          { time: "2:00 PM - 4:00 PM", topic: "Mock Test", duration: "2 hours" },
+        ],
+      },
+      {
+        day: "Friday",
+        sessions: [
+          { time: "10:00 AM - 12:00 PM", topic: "Revision", duration: "2 hours" },
+          { time: "3:00 PM - 4:00 PM", topic: "Doubt Clearing", duration: "1 hour" },
+        ],
+      },
+    ];
+
+    try {
+      // Save to Supabase
+      const { data, error } = await supabase
+        .from("study_plans")
+        .insert({
+          title: `${subject} Study Plan`,
+          subject: subject,
+          description: JSON.stringify(mockPlan),
+          start_date: new Date().toISOString().split("T")[0],
+          end_date: examDate,
+          status: "active",
+          user_id: user.id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
 
       setGeneratedPlan(mockPlan);
-      setIsGenerating(false);
+      setSavedPlans((prev) => [data, ...prev]);
+      setSelectedPlan(data);
+      
       toast({
         title: "Study plan generated!",
-        description: "Your personalized weekly study plan is ready.",
+        description: "Your personalized weekly study plan is ready and saved.",
       });
-    }, 2000);
+    } catch (error) {
+      console.error("Error saving study plan:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save study plan.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const loadPlan = (plan: StudyPlanDB) => {
+    setSelectedPlan(plan);
+    try {
+      const parsed = JSON.parse(plan.description || "[]");
+      setGeneratedPlan(parsed);
+    } catch {
+      setGeneratedPlan(null);
+    }
+  };
+
+  const deletePlan = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from("study_plans")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setSavedPlans((prev) => prev.filter((p) => p.id !== id));
+      if (selectedPlan?.id === id) {
+        setSelectedPlan(null);
+        setGeneratedPlan(null);
+      }
+      
+      toast({
+        title: "Plan deleted",
+        description: "The study plan has been removed.",
+      });
+    } catch (error) {
+      console.error("Error deleting plan:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete study plan.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -90,9 +207,55 @@ const StudyPlanner = () => {
       <DashboardHeader title="AI Study Planner" subtitle="Create a personalized study schedule" />
 
       <div className="p-6">
-        <div className="grid lg:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-4 gap-6">
+          {/* Saved Plans Sidebar */}
+          <div className="lg:col-span-1">
+            <div className="p-4 rounded-xl glass-card">
+              <h3 className="font-display text-sm font-semibold text-foreground mb-4">Saved Plans</h3>
+              {isLoading ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : savedPlans.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No saved plans yet</p>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {savedPlans.map((plan) => (
+                    <div
+                      key={plan.id}
+                      className={`p-3 rounded-lg cursor-pointer transition-colors group ${
+                        selectedPlan?.id === plan.id
+                          ? "bg-primary/10 border border-primary/20"
+                          : "bg-muted/50 hover:bg-muted"
+                      }`}
+                      onClick={() => loadPlan(plan)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{plan.title}</p>
+                          <p className="text-xs text-muted-foreground">{plan.subject}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deletePlan(plan.id);
+                          }}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Input Form */}
-          <div className="p-6 rounded-xl glass-card">
+          <div className="lg:col-span-1 p-6 rounded-xl glass-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded-xl gradient-accent flex items-center justify-center">
                 <Calendar className="w-5 h-5 text-secondary-foreground" />
@@ -129,31 +292,30 @@ const StudyPlanner = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="examDate">Exam Date</Label>
+              <div className="space-y-2">
+                <Label htmlFor="examDate">Exam Date</Label>
+                <Input
+                  id="examDate"
+                  type="date"
+                  value={examDate}
+                  onChange={(e) => setExamDate(e.target.value)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="studyHours">Daily Study Hours</Label>
+                <div className="relative">
+                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                   <Input
-                    id="examDate"
-                    type="date"
-                    value={examDate}
-                    onChange={(e) => setExamDate(e.target.value)}
+                    id="studyHours"
+                    type="number"
+                    placeholder="e.g., 4"
+                    value={studyHours}
+                    onChange={(e) => setStudyHours(e.target.value)}
+                    className="pl-10"
+                    min={1}
+                    max={12}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="studyHours">Daily Study Hours</Label>
-                  <div className="relative">
-                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <Input
-                      id="studyHours"
-                      type="number"
-                      placeholder="e.g., 4"
-                      value={studyHours}
-                      onChange={(e) => setStudyHours(e.target.value)}
-                      className="pl-10"
-                      min={1}
-                      max={12}
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -179,14 +341,16 @@ const StudyPlanner = () => {
           </div>
 
           {/* Generated Plan */}
-          <div className="p-6 rounded-xl glass-card">
+          <div className="lg:col-span-2 p-6 rounded-xl glass-card">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
                   <Calendar className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <h2 className="font-display text-lg font-semibold text-foreground">Your Weekly Plan</h2>
+                  <h2 className="font-display text-lg font-semibold text-foreground">
+                    {selectedPlan?.title || "Your Weekly Plan"}
+                  </h2>
                   <p className="text-sm text-muted-foreground">AI-optimized schedule</p>
                 </div>
               </div>
