@@ -2,32 +2,81 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GraduationCap, ArrowLeft, Mail, Lock, Loader2 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { Helmet } from "react-helmet-async";
+import { z } from "zod";
+
+const loginSchema = z.object({
+  email: z.string().trim().email({ message: "Please enter a valid email address" }),
+  password: z.string().min(6, { message: "Password must be at least 6 characters" }),
+});
 
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
+  const { signIn, user, loading } = useAuth();
+
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || "/dashboard";
+
+  useEffect(() => {
+    if (!loading && user) {
+      navigate(from, { replace: true });
+    }
+  }, [user, loading, navigate, from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrors({});
+
+    const validation = loginSchema.safeParse({ email, password });
+    if (!validation.success) {
+      const fieldErrors: { email?: string; password?: string } = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0] === "email") fieldErrors.email = err.message;
+        if (err.path[0] === "password") fieldErrors.password = err.message;
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate login - replace with actual auth
-    setTimeout(() => {
+    const { error } = await signIn(email, password);
+
+    if (error) {
       setIsLoading(false);
       toast({
-        title: "Welcome back!",
-        description: "You have successfully logged in.",
+        variant: "destructive",
+        title: "Sign in failed",
+        description: error.message === "Invalid login credentials" 
+          ? "Invalid email or password. Please try again." 
+          : error.message,
       });
-      navigate("/dashboard");
-    }, 1500);
+      return;
+    }
+
+    toast({
+      title: "Welcome back!",
+      description: "You have successfully logged in.",
+    });
+    navigate(from, { replace: true });
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -84,6 +133,9 @@ const Login = () => {
                     required
                   />
                 </div>
+                {errors.email && (
+                  <p className="text-sm text-destructive">{errors.email}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -100,6 +152,9 @@ const Login = () => {
                     required
                   />
                 </div>
+                {errors.password && (
+                  <p className="text-sm text-destructive">{errors.password}</p>
+                )}
               </div>
 
               <Button type="submit" className="w-full h-12" disabled={isLoading}>

@@ -3,32 +3,84 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GraduationCap, ArrowLeft, Mail, Lock, User, Loader2 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { Helmet } from "react-helmet-async";
+import { z } from "zod";
+
+const signupSchema = z.object({
+  name: z.string().trim().min(2, { message: "Name must be at least 2 characters" }).max(100),
+  email: z.string().trim().email({ message: "Please enter a valid email address" }),
+  password: z.string().min(8, { message: "Password must be at least 8 characters" }),
+});
 
 const Signup = () => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string }>({});
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signUp, user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && user) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [user, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrors({});
+
+    const validation = signupSchema.safeParse({ name, email, password });
+    if (!validation.success) {
+      const fieldErrors: { name?: string; email?: string; password?: string } = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0] === "name") fieldErrors.name = err.message;
+        if (err.path[0] === "email") fieldErrors.email = err.message;
+        if (err.path[0] === "password") fieldErrors.password = err.message;
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate signup - replace with actual auth
-    setTimeout(() => {
+    const { error } = await signUp(email, password, name);
+
+    if (error) {
       setIsLoading(false);
+      let errorMessage = error.message;
+      
+      if (error.message.includes("User already registered")) {
+        errorMessage = "An account with this email already exists. Please sign in instead.";
+      }
+      
       toast({
-        title: "Account created!",
-        description: "Welcome to StudyAI. Let's get started!",
+        variant: "destructive",
+        title: "Sign up failed",
+        description: errorMessage,
       });
-      navigate("/dashboard");
-    }, 1500);
+      return;
+    }
+
+    toast({
+      title: "Account created!",
+      description: "Welcome to StudyAI. Let's get started!",
+    });
+    navigate("/dashboard", { replace: true });
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -100,6 +152,9 @@ const Signup = () => {
                     required
                   />
                 </div>
+                {errors.name && (
+                  <p className="text-sm text-destructive">{errors.name}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -116,6 +171,9 @@ const Signup = () => {
                     required
                   />
                 </div>
+                {errors.email && (
+                  <p className="text-sm text-destructive">{errors.email}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -133,6 +191,9 @@ const Signup = () => {
                     minLength={8}
                   />
                 </div>
+                {errors.password && (
+                  <p className="text-sm text-destructive">{errors.password}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Must be at least 8 characters
                 </p>
