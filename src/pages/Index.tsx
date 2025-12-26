@@ -1,13 +1,29 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import Navbar from "@/components/landing/Navbar";
+import Hero from "@/components/landing/Hero";
+import Features from "@/components/landing/Features";
+import HowItWorks from "@/components/landing/HowItWorks";
+import CTA from "@/components/landing/CTA";
+import Footer from "@/components/landing/Footer";
+import { Helmet } from "react-helmet-async";
 
 const Index = () => {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
+    <>
+      <Helmet>
+        <title>StudyAI - AI-Powered Academic Assistant for University Students</title>
+        <meta name="description" content="Plan your studies, generate notes, solve doubts instantly with AI. The ultimate academic productivity platform for university students." />
+      </Helmet>
+      <div className="min-h-screen">
+        <Navbar />
+        <Hero />
+        <Features />
+        <div id="how-it-works">
+          <HowItWorks />
+        </div>
+        <CTA />
+        <Footer />
       </div>
-    </div>
+    </>
   );
 };
 
