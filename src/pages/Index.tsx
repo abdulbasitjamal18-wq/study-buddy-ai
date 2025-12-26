@@ -16,11 +16,15 @@ const Index = () => {
       <div className="min-h-screen">
         <Navbar />
         <Hero />
-        <Features />
+        <div id="features">
+          <Features />
+        </div>
         <div id="how-it-works">
           <HowItWorks />
         </div>
-        <CTA />
+        <div id="cta">
+          <CTA />
+        </div>
         <Footer />
       </div>
     </>
